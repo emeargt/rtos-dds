@@ -149,22 +149,46 @@ functionality.
 
 
 /*-----------------------------------------------------------*/
+/* Defines */
 #define mainQUEUE_LENGTH 100
 
+#define TASK1_PERIOD 1000 // in ms
+#define TASK2_PERIOD 2000 // in ms
+#define TASK3_PERIOD 3000 // in ms
 
-/*
- * TODO: Implement this function for any hardware specific clock configuration
- * that was not already performed before main() was called.
+/* Hardware setup functions */
+static void prvSetupHardware(void);
+
+/* F-Tasks */
+// DDS
+static void Deadline_Driven_Scheduler(void *pvParameters);
+
+// Deadline Driven Task Generator
+static void Task_Generator(void *pvParameters);
+
+// Monitor task
+static void Monitor_Task(void *pvParameters);
+
+// User defined tasks
+static void User_Task(void *pvParameters); // pass wait time with pvParameters
+
+/* Deadline-driven functions
+ * Interfaces to DDS
  */
-static void prvSetupHardware( void );
+void release_dd_task(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline);
+void complete_dd_task(uint32_t task_id);
 
-/*
- * The queue send and receive tasks as described in the comments at the top of
- * this file.
- */
-static void Manager_Task( void *pvParameters );
+// Get task lists
+**dd_task_list get_active_dd_task_list(void);
+**dd_task_list get_complete_dd_task_list(void);
+**dd_task_list get_overdue_dd_task_list(void);
 
-xQueueHandle xQueue_handle = 0;
+/* Queue handles */
+xQueueHandle xQ_new_tasks = 0;
+xQueueHandle xQ_release = 0;
+xQueueHandle xQ_complete = 0;
+xQueueHandle xQ_list_request = 0;
+xQueueHandle xQ_list_mailbox = 0;
 
 enum task_type {PERIODIC, APERIODIC}; //task_type may be PERIODIC or APERIODIC
 
@@ -193,25 +217,51 @@ static void sort(struct dd_task_node** head);
 static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time );
 static void push(struct dd_task_node** head, struct dd_task* new_task_p);
 
+/* Software Timer handles */
+TimerHandle_t task1_timer = 0;
+TimerHandle_t task2_timer = 0;
+TimerHandle_t task3_timer = 0;
+
+// Timer callback
+void vTimerCallback(TimerHandle_t xtimer);
+
+/* F-Task handles */
+TaskHandle_t h_dds = 0;
+TaskHandle_t h_task_generator = 0;
+TaskHandle_t h_monitor = 0;
+
+// User task handles
+
 
 /*----------------------------------------------------------*/
 
 int main(void)
 {
-	/* Configure the system ready to run the demo.  The clock configuration
-	can be done here if it was not done before main() was called. */
+	// Configure system
 	prvSetupHardware();
 
+	// Create queues
+	xQ_new_tasks = xQueueCreate(mainQUEUE_LENGTH, sizeof(uint32_t)); // takes a number identifying which user task to generate
+	xQ_release = xQueueCreate(mainQUEUE_LENGTH, sizeof(dd_task));
+	xQ_complete = xQueueCreate(mainQUEUE_LENGTH, sizeof(dd_task));
+	xQ_list_request = xQueueCreate(mainQUEUE_LENGTH, sizeof(uint32_t));
+	xQ_list_mailbox = xQueueCreate(mainQUEUE_LENGTH, sizeof(**dd_task_list));
 
-	/* Create the queue used by the queue send and queue receive tasks.
-	http://www.freertos.org/a00116.html */
-	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-							sizeof( uint32_t ) );	/* The size of each item the queue holds. */
+	// Add to the registry, for the benefit of kernel aware debugging
+	vQueueAddToRegistry(xQ_new_tasks, "NewTasksQ");
+	vQueueAddToRegistry(xQ_release, "ReleaseQ");
+	vQueueAddToRegistry(xQ_complete, "CompleteQ");
+	vQueueAddToRegistry(xQ_list_request, "ListRequestQ");
+	vQueueAddToRegistry(xQ_list_mailbox, "ListMailboxQ");
 
-	/* Add to the registry, for the benefit of kernel aware debugging. */
-	vQueueAddToRegistry( xQueue_handle, "MainQueue" );
+	// Create timers used for task generation notification
+	task1_timer = xTimerCreate("Task1", pdMS_TO_TICKS(TASK1_PERIOD), pdTRUE, (void*)0, vTimerCallback);
+	task2_timer = xTimerCreate("Task2", pdMS_TO_TICKS(TASK2_PERIOD), pdTRUE, (void*)0, vTimerCallback);
+	task3_timer = xTimerCreate("Task3", pdMS_TO_TICKS(TASK3_PERIOD), pdTRUE, (void*)0, vTimerCallback);
 
-	xTaskCreate( Manager_Task, "Manager", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+	xTaskCreate(Deadline_Driven_Scheduler, "DDS", configMINIMAL_STACK_SIZE, NULL, 5, h_dds);
+	xTaskCreate(Task_Generator, "TaskGenerator", configMINIMAL_STACK_SIZE, NULL, 3, h_task_generator);
+	xTaskCreate(Monitor_Task, "Monitor", configMINIMAL_STACK_SIZE, NULL, 2, h_monitor);
 
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
@@ -242,8 +292,6 @@ static void sort(struct dd_task_node** head)
 {
 
 
-
-
 }
 
 static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time )
@@ -260,15 +308,104 @@ static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t tas
 	x_QueueSend(xQ_release);//send new_task to new task Queue
 }
 
+/*-----------------------------------------------------------*/
+
+void release_dd_task(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline)
+{
+
+}
+
+void complete_dd_task(uint32_t task_id)
+{
+
+}
+
+**dd_task_node get_active_dd_task_list(void)
+{
+
+}
+
+**dd_task_node get_complete_dd_task_list(void)
+{
+
+}
+
+**dd_task_node get_overdue_dd_task_list(void)
+{
+
+}
 
 /*-----------------------------------------------------------*/
 
-static void Manager_Task( void *pvParameters )
+static void Deadline_Driven_Scheduler(void *pvParameters)
 {
+	while(1)
+	{
+		vTaskSuspend(h_dds);
+	}
+}
 
+static void Task_Generator(void *pvParameters)
+{
+	uint32_t new_task = 0;
+	while(1)
+	{
+		vTaskSuspend(h_task_generator);
+		if(xQueueReceive(xQ_new_tasks, &new_task, 0))
+		{
+			switch(new_task)
+			{
+			case 1:
+				break;
+			case 2:
+				break;
+			case 3:
+				break;
+			}
+		}
+	}
+}
+
+static void Monitor_Task(void *pvParameters)
+{
+	while(1)
+	{
+		vTaskSuspend(h_monitor);
+	}
+}
+
+static void User_Task(void *pvParameters)
+{
 	while(1)
 	{
 
+	}
+}
+
+/*-----------------------------------------------------------*/
+
+void vTimerCallback(TimerHandle_t xtimer)
+{
+	uint32_t new_task = 0;
+	switch(xtimer)
+	{
+	case task1_timer:
+		new_task = 1;
+		break;
+	case task2_timer:
+		new_task = 2;
+		break;
+	case task3_timer:
+		new_task = 3;
+		break;
+	}
+	if(xQueueSend(xQ_new_tasks, &new_task, 0))
+	{
+		vTaskResume(h_task_generator);
+	}
+	else
+	{
+		printf("Timer Callback: Failed to add Task%d to queue.\n", new_task);
 	}
 }
 
