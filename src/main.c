@@ -150,6 +150,9 @@ functionality.
 
 /*-----------------------------------------------------------*/
 /* Defines */
+#define TRUE 1
+#define FALSE 0
+
 #define mainQUEUE_LENGTH 100
 
 #define TASK1_PERIOD 1000 // in ms
@@ -291,7 +294,34 @@ static void swap(struct dd_task_node* a, struct dd_task_node* b)
 static void sort(struct dd_task_node** head)
 {
 
+	    int swapped; //flag for indicating swap took place
 
+	    struct dd_task_node* ptr1; //temporary pointers to for list node
+	    struct dd_task_node* ptr2;
+	    struct dd_task_node* lptr = 0;
+
+	    /* Checking for empty list */
+	    if (head == 0)
+	        return;
+
+	    do
+	    {
+	        swapped = FALSE;
+	        ptr1 = head;
+
+	        while (ptr1->next_task_p != lptr)
+	        {
+	        	ptr2 = ptr1->next_task_p;
+	            if (ptr1->task_p->absolute_deadline > ptr2->task_p->absolute_deadline)
+	            {
+	                swap(ptr1, ptr1->next_task_p);
+	                swapped = TRUE;
+	            }
+	            ptr1 = ptr1->next_task_p;
+	        }
+	        lptr = ptr1;
+	    }
+	    while (swapped);
 }
 
 static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time )
