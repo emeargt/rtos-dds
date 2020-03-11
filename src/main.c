@@ -152,6 +152,7 @@ functionality.
 /* Defines */
 #define TRUE 1
 #define FALSE 0
+#define BASIC_VIEW 1
 
 #define mainQUEUE_LENGTH 100
 
@@ -178,13 +179,6 @@ static void User_Task(void *pvParameters); // pass wait time with pvParameters
 /* Deadline-driven functions
  * Interfaces to DDS
  */
-void release_dd_task(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline);
-void complete_dd_task(uint32_t task_id);
-
-// Get task lists
-**dd_task_list get_active_dd_task_list(void);
-**dd_task_list get_complete_dd_task_list(void);
-**dd_task_list get_overdue_dd_task_list(void);
 
 /* Queue handles */
 xQueueHandle xQ_new_tasks = 0;
@@ -215,10 +209,24 @@ struct dd_task_node{
 
 };
 
+void release_dd_task(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline);
+void complete_dd_task(uint32_t task_id);
+
+// Get task lists
+struct dd_task_node** get_active_dd_task_list(void);
+struct dd_task_node** get_complete_dd_task_list(void);
+struct dd_task_node** get_overdue_dd_task_list(void);
+
+//sorting tasks
 static void swap(struct dd_task_node* a, struct dd_task_node* b);
 static void sort(struct dd_task_node** head);
-static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time );
 static void push(struct dd_task_node** head, struct dd_task* new_task_p);
+
+void print_task_list(struct dd_task_node** head);
+
+
+static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time );
+
 
 /* Software Timer handles */
 TimerHandle_t task1_timer = 0;
@@ -294,34 +302,35 @@ static void swap(struct dd_task_node* a, struct dd_task_node* b)
 static void sort(struct dd_task_node** head)
 {
 
-	    int swapped; //flag for indicating swap took place
+	int swapped; //flag for indicating swap took place
 
-	    struct dd_task_node* ptr1; //temporary pointers to for list node
-	    struct dd_task_node* ptr2;
-	    struct dd_task_node* lptr = 0;
+	struct dd_task_node* ptr1; //temporary pointers to for list node
+	struct dd_task_node* ptr2;
+	struct dd_task_node* lptr = 0;
 
-	    /* Checking for empty list */
-	    if (head == 0)
-	        return;
+	/* Checking for empty list */
+	if (head == NULL)
+		return;
 
-	    do
-	    {
-	        swapped = FALSE;
-	        ptr1 = head;
+	do
+	{
+		swapped = FALSE;
+		ptr1 = head;
 
-	        while (ptr1->next_task_p != lptr)
-	        {
-	        	ptr2 = ptr1->next_task_p;
-	            if (ptr1->task_p->absolute_deadline > ptr2->task_p->absolute_deadline)
-	            {
-	                swap(ptr1, ptr1->next_task_p);
-	                swapped = TRUE;
-	            }
-	            ptr1 = ptr1->next_task_p;
-	        }
-	        lptr = ptr1;
-	    }
-	    while (swapped);
+		while (ptr1->next_task_p != lptr)
+		{
+			ptr2 = ptr1->next_task_p;
+			if (ptr1->task_p->absolute_deadline > ptr2->task_p->absolute_deadline)
+			{
+				swap(ptr1, ptr1->next_task_p);
+				swapped = TRUE;
+			}
+			ptr1 = ptr1->next_task_p;
+		}
+		lptr = ptr1;
+	}
+	while (swapped);
+
 }
 
 static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time )
@@ -350,18 +359,53 @@ void complete_dd_task(uint32_t task_id)
 
 }
 
-**dd_task_node get_active_dd_task_list(void)
+struct dd_task_node** get_active_dd_task_list(void)
 {
-
+	struct dd_task_node** head;
+	//fetch current head via Queue
+	return head;
 }
 
-**dd_task_node get_complete_dd_task_list(void)
+struct dd_task_node** get_complete_dd_task_list(void)
 {
-
+	struct dd_task_node** head;
+	//fetch current head via Queue
+	return head;
 }
 
-**dd_task_node get_overdue_dd_task_list(void)
+struct dd_task_node** get_overdue_dd_task_list(void)
 {
+	struct dd_task_node** head;
+	//fetch current head via Queue
+	return head;
+}
+
+void print_task_list(struct dd_task_node** head)
+{
+	struct dd_task_node* temp_dd_task_node = head;
+	int i = 1;
+
+
+	do
+	{
+
+	#ifdef BASIC_VIEW
+		i++;
+	#endif
+
+	#ifdef ADVANCED_VIEW
+		printf("#%-3d \t", i);
+		printf("Task ID: %d \n", &(temp_dd_task_node->task_p->task_id));
+		//keep listing task parameters as desired
+		i++;
+	#endif
+
+	temp_dd_task_node = temp_dd_task_node->next_task_p;
+
+	}
+	while(temp_dd_task_node->next_task_p != NULL);
+
+	printf("Number of tasks in list: %d \n", (i-1));
 
 }
 
@@ -401,6 +445,18 @@ static void Monitor_Task(void *pvParameters)
 	while(1)
 	{
 		vTaskSuspend(h_monitor);
+
+		//struct dd_task_list** temp;
+
+		printf("Active DD Task List Monitor Data: \n");
+		print_task_list(get_active_dd_task_list(void));
+
+		printf("Complete DD Task List Monitor Data: \n");
+		print_task_list(get_complete_dd_task_list(void));
+
+		printf("Overdue DD Task List Monitor Data: \n");
+		print_task_list(get_overdue_dd_task_list(void));
+
 	}
 }
 
