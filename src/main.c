@@ -166,8 +166,35 @@ static void Manager_Task( void *pvParameters );
 
 xQueueHandle xQueue_handle = 0;
 
+enum task_type {PERIODIC, APERIODIC}; //task_type may be PERIODIC or APERIODIC
 
-/*-----------------------------------------------------------*/
+//struct for storing dd task parameters
+struct dd_task {
+
+	TaskHandle_t t_handle;
+	task_type type;
+	uint32_t task_id;
+	uint32_t release_time;
+	uint32_t absolute_deadline;
+	uint32_t completion_time;
+
+};
+
+//struct for building linked dd task lists.
+struct dd_task_node{
+
+	struct dd_task* task_p;			//pointer to dd_task
+	struct dd_task_list* next_task_p;	//pointer to next task_node
+
+};
+
+static void swap(struct dd_task_node* a, struct dd_task_node* b);
+static void sort(struct dd_task_node** head);
+static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time );
+static void push(struct dd_task_node** head, struct dd_task* new_task_p);
+
+
+/*----------------------------------------------------------*/
 
 int main(void)
 {
@@ -190,6 +217,47 @@ int main(void)
 	vTaskStartScheduler();
 
 	return 0;
+}
+
+//function for pushing new dd_task_node to the top of the list
+static void push(struct dd_task_node** head, struct dd_task* new_task_p)
+{
+	struct dd_task_node* newNode = (struct dd_task_node*)malloc(sizeof(struct dd_task_node));
+	newNode->task_p = new_task_p;
+	newNode->next_task_p = *head;
+	*head = newNode;
+}
+
+//function for swaping dd_task pointers between two dd_task_nodes. Called after comparison of dd_task priority
+static void swap(struct dd_task_node* a, struct dd_task_node* b)
+{
+	struct dd_task* temp_task_p = a->task_p;
+	a->task_p = b->task_p;
+	b->task_p = temp_task_p;
+
+}
+
+
+static void sort(struct dd_task_node** head)
+{
+
+
+
+
+}
+
+static void release_dd_task( TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline, uint32_t completion_time )
+{
+	struct dd_task* new_task;
+
+	new_task->t_handle = t_handle;
+	new_task->type = type;
+    new_task->task_id = task_id;
+	new_task->release_time = release_time;
+	new_task->absolute_deadline = absolute_deadline;
+	new_task->completion_time = completion_time;
+
+	x_QueueSend(xQ_release);//send new_task to new task Queue
 }
 
 
