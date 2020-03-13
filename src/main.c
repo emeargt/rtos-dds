@@ -258,6 +258,8 @@ TaskHandle_t h3 = 0;
 TaskHandle_t h4 = 0;
 TaskHandle_t h5 = 0;
 
+//sys tick value
+uint16_t ticks = 0;
 
 /*----------------------------------------------------------*/
 
@@ -357,7 +359,11 @@ static void sort(struct dd_task_node** head)
 
 void release_dd_task(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline)
 {
+
+
+
 	struct dd_task new_dd_task;
+	new_dd_task.release_time = millis();//set current millis count as release time
 	new_dd_task.t_handle = t_handle;
 	new_dd_task.type = type;
 	new_dd_task.task_id = task_id;
@@ -588,6 +594,23 @@ static void prvSetupHardware( void )
 	http://www.freertos.org/RTOS-Cortex-M3-M4.html */
 	NVIC_SetPriorityGrouping( 0 );
 
+	RCC_ClocksTypeDef RCC_Clocks;
+	RCC_GetClocksFreq (&RCC_Clocks);
+	(void) SysTick_Config (RCC_Clocks.HCLK_Frequency / 1000);
+
 	/* TODO: Setup the clocks, etc. here, if they were not configured before
 	main() was called. */
 }
+
+void SysTick_Handler (void)
+{
+   ticks++;
+}
+
+int32_t millis(void)
+{
+	return ticks;//scale appropriately
+}
+
+
+
