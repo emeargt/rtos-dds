@@ -607,7 +607,7 @@ void SysTick_Handler (void)
    ticks++;
 }
 
-int32_t millis(void)
+inline int32_t millis(void)
 {
 	return ticks;//scale appropriately
 }
