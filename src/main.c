@@ -164,6 +164,9 @@ functionality.
 #define TASK2_EXE_TIME 150 // in ms
 #define TASK3_EXE_TIME 250 // in ms
 
+#define SET_PRIORITY 1
+#define RST_PRIORITY 0
+
 typedef enum {PERIODIC, APERIODIC} task_type; // task_type may be PERIODIC or APERIODIC
 
 // struct for storing dd task parameters
@@ -181,9 +184,16 @@ struct dd_task {
 // struct for building linked dd task lists
 struct dd_task_node {
 
-	struct dd_task* task_p;	//pointer to dd_task
-	struct dd_task_list* next_task_p; //pointer to next task_node
+	struct dd_task task;	// dd_task
+	struct dd_task_node* next_task_p; // pointer to next task_node
 
+};
+
+struct task_info {
+
+	uint32_t task_num;
+	task_type type;
+	uint32_t period;
 };
 
 /* Hardware setup functions */
@@ -214,28 +224,19 @@ struct dd_task_node **get_active_dd_task_list(void);
 struct dd_task_node **get_complete_dd_task_list(void);
 struct dd_task_node **get_overdue_dd_task_list(void);
 
+// sorting tasks
+void swap(struct dd_task_node* a, struct dd_task_node* b);
+void sort(struct dd_task_node** head);
+void push(struct dd_task_node** head, struct dd_task* new_task_p);
+
+void print_task_list(struct dd_task_node** head);
+
 /* Queue handles */
 xQueueHandle xQ_new_tasks = 0;
 xQueueHandle xQ_release = 0;
 xQueueHandle xQ_complete = 0;
 xQueueHandle xQ_list_request = 0;
 xQueueHandle xQ_list_mailbox = 0;
-
-
-void release_dd_task(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t absolute_deadline);
-void complete_dd_task(uint32_t task_id);
-
-// Get task lists
-struct dd_task_node** get_active_dd_task_list(void);
-struct dd_task_node** get_complete_dd_task_list(void);
-struct dd_task_node** get_overdue_dd_task_list(void);
-
-//sorting tasks
-static void swap(struct dd_task_node* a, struct dd_task_node* b);
-static void sort(struct dd_task_node** head);
-static void push(struct dd_task_node** head, struct dd_task* new_task_p);
-
-void print_task_list(struct dd_task_node** head);
 
 /* Software Timer handles */
 TimerHandle_t task1_timer = 0;
@@ -250,15 +251,6 @@ TaskHandle_t h_dds = 0;
 TaskHandle_t h_task_generator = 0;
 TaskHandle_t h_monitor = 0;
 
-// User task handles
-TaskHandle_t h0 = 0;
-TaskHandle_t h1 = 0;
-TaskHandle_t h2 = 0;
-TaskHandle_t h3 = 0;
-TaskHandle_t h4 = 0;
-TaskHandle_t h5 = 0;
-
-
 /*----------------------------------------------------------*/
 
 int main(void)
@@ -267,11 +259,11 @@ int main(void)
 	prvSetupHardware();
 
 	// Create queues
-	xQ_new_tasks = xQueueCreate(mainQUEUE_LENGTH, sizeof(uint32_t)); // takes a number identifying which user task to generate
+	xQ_new_tasks = xQueueCreate(mainQUEUE_LENGTH, sizeof(struct task_info)); // takes a number identifying which user task to generate
 	xQ_release = xQueueCreate(mainQUEUE_LENGTH, sizeof(struct dd_task));
 	xQ_complete = xQueueCreate(mainQUEUE_LENGTH, sizeof(struct dd_task));
 	xQ_list_request = xQueueCreate(mainQUEUE_LENGTH, sizeof(uint32_t));
-	xQ_list_mailbox = xQueueCreate(mainQUEUE_LENGTH, sizeof(struct dd_task_node**));
+	xQ_list_mailbox = xQueueCreate(mainQUEUE_LENGTH, sizeof(struct dd_task_node*));
 
 	// Add to the registry, for the benefit of kernel aware debugging
 	vQueueAddToRegistry(xQ_new_tasks, "NewTasksQ");
@@ -282,17 +274,17 @@ int main(void)
 
 	// Create timers used for task generation notification
 	task1_timer = xTimerCreate("Task1", pdMS_TO_TICKS(TASK1_PERIOD), pdTRUE, (void*)0, vTimerCallback);
-	//task2_timer = xTimerCreate("Task2", pdMS_TO_TICKS(TASK2_PERIOD), pdTRUE, (void*)0, vTimerCallback);
-	//task3_timer = xTimerCreate("Task3", pdMS_TO_TICKS(TASK3_PERIOD), pdTRUE, (void*)0, vTimerCallback);
+	task2_timer = xTimerCreate("Task2", pdMS_TO_TICKS(TASK2_PERIOD), pdTRUE, (void*)0, vTimerCallback);
+	task3_timer = xTimerCreate("Task3", pdMS_TO_TICKS(TASK3_PERIOD), pdTRUE, (void*)0, vTimerCallback);
 
-	//xTaskCreate(Deadline_Driven_Scheduler, "DDS", configMINIMAL_STACK_SIZE, NULL, 5, h_dds);
-	xTaskCreate(Task_Generator, "TaskGenerator", configMINIMAL_STACK_SIZE, NULL, 3, h_task_generator);
-	//xTaskCreate(Monitor_Task, "Monitor", configMINIMAL_STACK_SIZE, NULL, 2, h_monitor);
+	xTaskCreate(Deadline_Driven_Scheduler, "DDS", configMINIMAL_STACK_SIZE, NULL, 5, &h_dds);
+	xTaskCreate(Task_Generator, "TaskGenerator", configMINIMAL_STACK_SIZE, NULL, 3, &h_task_generator);
+	//xTaskCreate(Monitor_Task, "Monitor", configMINIMAL_STACK_SIZE, NULL, 2, &h_monitor);
 
 	// Start timers
 	xTimerStart(task1_timer, 0);
-	//xTimerStart(task2_timer, 0);
-	//xTimerStart(task3_timer, 0);
+	xTimerStart(task2_timer, 0);
+	xTimerStart(task3_timer, 0);
 
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
@@ -300,47 +292,47 @@ int main(void)
 	return 0;
 }
 
+/*-----------------------------------------------------------*/
+
 // function for pushing new dd_task_node to the top of the list
-static void push(struct dd_task_node** head, struct dd_task* new_task_p)
+void push(struct dd_task_node** head, struct dd_task* new_task_p)
 {
-	struct dd_task_node* newNode = (struct dd_task_node*)malloc(sizeof(struct dd_task_node));
-	newNode->task_p = new_task_p;
+	struct dd_task_node* newNode = (struct dd_task_node*)pvPortMalloc(sizeof(struct dd_task_node));
+	newNode->task = *new_task_p;
 	newNode->next_task_p = *head;
 	*head = newNode;
 }
 
 // function for swapping dd_task pointers between two dd_task_nodes. Called after comparison of dd_task priority
-static void swap(struct dd_task_node* a, struct dd_task_node* b)
+void swap(struct dd_task_node* a, struct dd_task_node* b)
 {
-	struct dd_task* temp_task_p = a->task_p;
-	a->task_p = b->task_p;
-	b->task_p = temp_task_p;
+	struct dd_task temp_task = a->task;
+	a->task = b->task;
+	b->task = temp_task;
 
 }
 
 
-static void sort(struct dd_task_node** head)
+void sort(struct dd_task_node** head)
 {
 
-	int swapped; //flag for indicating swap took place
+	int swapped; // flag for indicating swap took place
 
-	struct dd_task_node* ptr1; //temporary pointers to for list node
-	struct dd_task_node* ptr2;
-	struct dd_task_node* lptr = 0;
+	struct dd_task_node* ptr1; // temporary pointer to for list node
+	struct dd_task_node* lptr = NULL;
 
 	/* Checking for empty list */
-	if (head == NULL)
+	if (*head == NULL)
 		return;
 
 	do
 	{
 		swapped = FALSE;
-		ptr1 = head;
+		ptr1 = *head;
 
 		while (ptr1->next_task_p != lptr)
 		{
-			ptr2 = ptr1->next_task_p;
-			if (ptr1->task_p->absolute_deadline > ptr2->task_p->absolute_deadline)
+			if (ptr1->task.absolute_deadline > (ptr1->next_task_p)->task.absolute_deadline)
 			{
 				swap(ptr1, ptr1->next_task_p);
 				swapped = TRUE;
@@ -350,7 +342,6 @@ static void sort(struct dd_task_node** head)
 		lptr = ptr1;
 	}
 	while (swapped);
-
 }
 
 /*-----------------------------------------------------------*/
@@ -363,7 +354,10 @@ void release_dd_task(TaskHandle_t t_handle, task_type type, uint32_t task_id, ui
 	new_dd_task.task_id = task_id;
 	new_dd_task.absolute_deadline = absolute_deadline;
 
-	xQueueSend(xQ_release, &new_dd_task, 0); // send new_task to new task Queue
+	if(xQueueSend(xQ_release, &new_dd_task, 0)) // send new_task to new task Queue
+	{
+		vTaskResume(h_dds);
+	}
 }
 
 void complete_dd_task(uint32_t task_id)
@@ -396,9 +390,8 @@ struct dd_task_node** get_overdue_dd_task_list(void)
 
 void print_task_list(struct dd_task_node** head)
 {
-	struct dd_task_node* temp_dd_task_node = head;
+	struct dd_task_node* temp_dd_task_node = *head;
 	int i = 1;
-
 
 	do
 	{
@@ -427,49 +420,59 @@ void print_task_list(struct dd_task_node** head)
 
 static void Deadline_Driven_Scheduler(void *pvParameters)
 {
+	struct dd_task_node *active_head = NULL;
+	struct dd_task_node *complete_head = NULL;
+	struct dd_task_node *overdue_head = NULL;
 	while(1)
 	{
 		vTaskSuspend(h_dds);
+
+		// if list request
+
+		struct dd_task to_release;
+		if(xQueueReceive(xQ_release, &to_release, 0))
+		{
+			// get and assign release time
+
+			// add new task to active task list
+			push(&active_head, &to_release);
+		}
+
+		// if completed task
+
+		// sort active task list
+		sort(&active_head);
+		// reset task priorities
+		struct dd_task_node *temp = active_head;
+		while(temp != NULL)
+		{
+			vTaskPrioritySet(temp->task.t_handle, RST_PRIORITY);
+			temp = temp->next_task_p;
+		}
+		// schedule earliest deadline task by setting priority
+		// head of active task list
+		vTaskPrioritySet(active_head->task.t_handle, SET_PRIORITY);
 	}
 }
 
 static void Task_Generator(void *pvParameters)
 {
-	uint32_t new_task = 0;
+	struct task_info new_task;
 	uint32_t id = 0;
 	while(1)
 	{
 		vTaskSuspend(h_task_generator);
-		if(xQueueReceive(xQ_new_tasks, &new_task, 0))
+		while(uxQueueMessagesWaiting(xQ_new_tasks))
 		{
-			char name[20];
-			sprintf(name, "Task%d", id);
-			switch(id % 6)
+			if(xQueueReceive(xQ_new_tasks, &new_task, 0))
 			{
-			case 0:
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 5, h0);
-				release_dd_task(h0, PERIODIC, id, TASK1_PERIOD);
-				break;
-			case 1:
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 5, h1);
-				release_dd_task(h1, PERIODIC, id, TASK1_PERIOD);
-				break;
-			case 2:
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 5, h2);
-				release_dd_task(h2, PERIODIC, id, TASK1_PERIOD);
-				break;
-			case 3:
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 5, h3);
-				release_dd_task(h3, PERIODIC, id, TASK1_PERIOD);
-				break;
-			case 4:
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 5, h4);
-				release_dd_task(h4, PERIODIC, id, TASK1_PERIOD);
-				break;
-			case 5:
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 5, h5);
-				release_dd_task(h5, PERIODIC, id, TASK1_PERIOD);
-				break;
+				char name[20];
+				sprintf(name, "Task%u", (unsigned int)id);
+				TaskHandle_t h_new = 0;
+				uint32_t abs_deadline = new_task.period;
+				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task.task_num, 0, &h_new);
+				release_dd_task(h_new, new_task.type, id, abs_deadline);
+				++id;
 			}
 		}
 	}
@@ -484,13 +487,13 @@ static void Monitor_Task(void *pvParameters)
 		//struct dd_task_list** temp;
 
 		printf("Active DD Task List Monitor Data: \n");
-		print_task_list(get_active_dd_task_list(void));
+		print_task_list(get_active_dd_task_list());
 
 		printf("Complete DD Task List Monitor Data: \n");
-		print_task_list(get_complete_dd_task_list(void));
+		print_task_list(get_complete_dd_task_list());
 
 		printf("Overdue DD Task List Monitor Data: \n");
-		print_task_list(get_overdue_dd_task_list(void));
+		print_task_list(get_overdue_dd_task_list());
 
 	}
 }
@@ -499,7 +502,16 @@ static void User_Task(void *pvParameters)
 {
 	while(1)
 	{
-
+		uint32_t task_num = *(uint32_t*)pvParameters;
+		switch(task_num)
+		{
+		case 1:
+		case 2:
+		case 3:
+		default:
+			break;
+		}
+		//complete_dd_task();
 	}
 }
 
@@ -507,18 +519,24 @@ static void User_Task(void *pvParameters)
 
 void vTimerCallback(TimerHandle_t xtimer)
 {
-	uint32_t new_task = 0;
+	struct task_info new_task;
 	if(xtimer == task1_timer)
 	{
-		new_task = 1;
+		new_task.task_num = 1;
+		new_task.type = PERIODIC;
+		new_task.period = TASK1_PERIOD;
 	}
 	else if(xtimer == task2_timer)
 	{
-		new_task = 2;
+		new_task.task_num = 2;
+		new_task.type = PERIODIC;
+		new_task.period = TASK2_PERIOD;
 	}
 	else if(xtimer == task3_timer)
 	{
-		new_task = 3;
+		new_task.task_num = 3;
+		new_task.type = PERIODIC;
+		new_task.period = TASK3_PERIOD;
 	}
 	if(xQueueSend(xQ_new_tasks, &new_task, 0))
 	{
@@ -526,7 +544,7 @@ void vTimerCallback(TimerHandle_t xtimer)
 	}
 	else
 	{
-		printf("Timer Callback: Failed to add Task%d to queue.\n", new_task);
+		printf("Timer Callback: Failed to add Task%d to queue.\n", new_task.task_num);
 	}
 }
 
