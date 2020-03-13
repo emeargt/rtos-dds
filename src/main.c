@@ -251,7 +251,8 @@ TaskHandle_t h_dds = 0;
 TaskHandle_t h_task_generator = 0;
 TaskHandle_t h_monitor = 0;
 
-/*----------------------------------------------------------*/
+// sys tick value
+uint16_t ticks = 0;
 
 int main(void)
 {
@@ -433,7 +434,7 @@ static void Deadline_Driven_Scheduler(void *pvParameters)
 		if(xQueueReceive(xQ_release, &to_release, 0))
 		{
 			// get and assign release time
-
+			to_release.release_time = millis(); // set current millis count as release time
 			// add new task to active task list
 			push(&active_head, &to_release);
 		}
@@ -606,6 +607,23 @@ static void prvSetupHardware( void )
 	http://www.freertos.org/RTOS-Cortex-M3-M4.html */
 	NVIC_SetPriorityGrouping( 0 );
 
+	RCC_ClocksTypeDef RCC_Clocks;
+	RCC_GetClocksFreq (&RCC_Clocks);
+	(void) SysTick_Config (RCC_Clocks.HCLK_Frequency / 1000);
+
 	/* TODO: Setup the clocks, etc. here, if they were not configured before
 	main() was called. */
 }
+
+void SysTick_Handler(void)
+{
+   ticks++;
+}
+
+inline int32_t millis(void)
+{
+	return ticks;//scale appropriately
+}
+
+
+
