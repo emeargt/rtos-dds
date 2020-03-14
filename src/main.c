@@ -236,6 +236,7 @@ struct dd_task_node** get_overdue_dd_task_list(void);
 void swap(struct dd_task_node* a, struct dd_task_node* b);
 void sort(struct dd_task_node** head);
 void push(struct dd_task_node** head, struct dd_task* new_task_p);
+struct dd_task_node* pop(struct dd_task_node** head);
 
 void print_task_list(struct dd_task_node** head);
 
@@ -316,6 +317,15 @@ void swap(struct dd_task_node* a, struct dd_task_node* b)
 	a->task = b->task;
 	b->task = temp_task;
 
+}
+
+struct dd_task_node* pop(struct dd_task_node** head)
+{
+	struct dd_task_node* temp_Node_p = *head;
+	*head=temp_Node_p->next_task_p;
+	temp_Node_p->next_task_p = NULL;
+
+	return temp_Node_p;
 }
 
 
