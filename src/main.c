@@ -154,8 +154,19 @@ functionality.
 #define FALSE 0
 #define BASIC_VIEW 1
 
+// LEDs
+#define DISPLAY_LEDS 1
+
+#ifdef DISPLAY_LEDS
+#define GREEN_LED	LED4
+#define RED_LED		LED5
+#define BLUE_LED	LED6
+#endif
+
+// Queue length
 #define mainQUEUE_LENGTH 100
 
+// Task values
 #define TASK1_PERIOD 500 // in ms
 #define TASK2_PERIOD 500 // in ms
 #define TASK3_PERIOD 750 // in ms
@@ -164,6 +175,7 @@ functionality.
 #define TASK2_EXE_TIME 150 // in ms
 #define TASK3_EXE_TIME 250 // in ms
 
+// DDS task priorities (set and reset)
 #define SET_PRIORITY 1
 #define RST_PRIORITY 0
 
@@ -202,6 +214,9 @@ struct task_info {
 	task_type type;
 	uint32_t period;
 	uint32_t execution_time;
+#ifdef DISPLAY_LEDS
+	Led_TypeDef led;
+#endif
 };
 
 /* Hardware setup functions */
@@ -236,7 +251,7 @@ struct dd_task_node** get_overdue_dd_task_list(void);
 void swap(struct dd_task_node* a, struct dd_task_node* b);
 void sort(struct dd_task_node** head);
 void push(struct dd_task_node** head, struct dd_task* new_task_p);
-struct dd_task_node* pop(struct dd_task_node** head);
+struct dd_task pop(struct dd_task_node** head);
 
 void print_task_list(struct dd_task_node** head);
 
@@ -264,6 +279,13 @@ int main(void)
 {
 	// Configure system
 	prvSetupHardware();
+
+	// Initialize LEDs
+#ifdef DISPLAY_LEDS
+	STM_EVAL_LEDInit(GREEN_LED);
+	STM_EVAL_LEDInit(RED_LED);
+	STM_EVAL_LEDInit(BLUE_LED);
+#endif
 
 	// Create queues
 	xQ_new_tasks = xQueueCreate(mainQUEUE_LENGTH, sizeof(struct task_info)); // takes a number identifying which user task to generate
@@ -319,15 +341,16 @@ void swap(struct dd_task_node* a, struct dd_task_node* b)
 
 }
 
-struct dd_task_node* pop(struct dd_task_node** head)
+// function for popping dd_task_node from list head
+struct dd_task pop(struct dd_task_node** head)
 {
-	struct dd_task_node* temp_Node_p = *head;
-	*head=temp_Node_p->next_task_p;
-	temp_Node_p->next_task_p = NULL;
+	struct dd_task_node* temp_node_p = *head; // create temp pointer to list head
+	struct dd_task temp_task = temp_node_p->task; // copy dd_task
+	*head = temp_node_p->next_task_p; // move head pointer to next dd_task_node
+	vPortFree((void*)temp_node_p); // free dd_task_node
 
-	return temp_Node_p;
+	return temp_task; // return popped dd_task
 }
-
 
 void sort(struct dd_task_node** head)
 {
@@ -337,7 +360,7 @@ void sort(struct dd_task_node** head)
 	struct dd_task_node* ptr1; // temporary pointer to for list node
 	struct dd_task_node* lptr = NULL;
 
-	/* Checking for empty list */
+	// Checking for empty list
 	if (*head == NULL)
 		return;
 
@@ -515,13 +538,20 @@ static void Deadline_Driven_Scheduler(void *pvParameters)
 				if(complete_id == active_head->task.task_id)
 				{
 					// pop completed task from active list
-
+					struct dd_task complete_task = pop(&active_head);
 					// assign completion time to task
-
+					complete_task.completion_time = cur_time;
 					// delete associated f-task to free up memory
-
+					vTaskDelete(complete_task.t_handle);
 					// check cur_time against deadline
-
+					if(complete_task.completion_time > complete_task.absolute_deadline)
+					{
+						push(&overdue_head, &complete_task); // deadline exceeded, add task to overdue list
+					}
+					else
+					{
+						push(&complete_head, &complete_task); // deadline met, add task to complete list
+					}
 				}
 			}
 			// sort active task list
@@ -542,13 +572,13 @@ static void Deadline_Driven_Scheduler(void *pvParameters)
 
 static void Task_Generator(void *pvParameters)
 {
-	struct task_info new_task;
 	uint32_t id = 0;
 	while(1)
 	{
 		vTaskSuspend(h_task_generator);
 		while(uxQueueMessagesWaiting(xQ_new_tasks))
 		{
+			struct task_info new_task;
 			if(xQueueReceive(xQ_new_tasks, &new_task, 0))
 			{
 				char name[20];
@@ -556,7 +586,7 @@ static void Task_Generator(void *pvParameters)
 				new_task.id = id;
 				TaskHandle_t h_new = 0;
 				uint32_t abs_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(new_task.period);
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 0, &h_new);
+				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)(&new_task), 0, &h_new);
 				release_dd_task(h_new, new_task.type, id, abs_deadline);
 				++id;
 			}
@@ -589,9 +619,19 @@ static void User_Task(void *pvParameters)
 	while(1)
 	{
 		struct task_info* task = (struct task_info*)pvParameters;
+#ifdef DISPLAY_LEDS
+		STM_EVAL_LEDOn(task->led);
+#endif
 		// delay for user task execution time
 		TickType_t delay_ticks = xTaskGetTickCount() + pdMS_TO_TICKS(task->execution_time);
-		while(xTaskGetTickCount() < delay_ticks);
+		TickType_t cur_tick = xTaskGetTickCount();
+		while(cur_tick < delay_ticks)
+		{
+			cur_tick = xTaskGetTickCount();
+		}
+#ifdef DISPLAY_LEDS
+		STM_EVAL_LEDOff(task->led);
+#endif
 		complete_dd_task(task->id);
 	}
 }
@@ -606,18 +646,27 @@ void vTimerCallback(TimerHandle_t xtimer)
 		new_task.type = PERIODIC;
 		new_task.period = TASK1_PERIOD;
 		new_task.execution_time = TASK1_EXE_TIME;
+#ifdef DISPLAY_LEDS
+		new_task.led = GREEN_LED;
+#endif
 	}
 	else if(xtimer == task2_timer)
 	{
 		new_task.type = PERIODIC;
 		new_task.period = TASK2_PERIOD;
 		new_task.execution_time = TASK2_EXE_TIME;
+#ifdef DISPLAY_LEDS
+		new_task.led = RED_LED;
+#endif
 	}
 	else if(xtimer == task3_timer)
 	{
 		new_task.type = PERIODIC;
 		new_task.period = TASK3_PERIOD;
 		new_task.execution_time = TASK3_EXE_TIME;
+#ifdef DISPLAY_LEDS
+		new_task.led = BLUE_LED;
+#endif
 	}
 	if(xQueueSend(xQ_new_tasks, &new_task, 0))
 	{
@@ -625,7 +674,7 @@ void vTimerCallback(TimerHandle_t xtimer)
 	}
 	else
 	{
-		printf("Timer Callback: Failed to add Task%u to queue.\n", (unsigned int)new_task.task_num);
+		printf("Timer Callback: Failed to add task to queue.\n");
 	}
 }
 
