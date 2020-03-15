@@ -166,6 +166,8 @@ functionality.
 // Queue length
 #define mainQUEUE_LENGTH 100
 
+#define MONITOR_TASK_PERIOD 0
+
 // Task values
 #define TASK1_PERIOD 500 // in ms
 #define TASK2_PERIOD 500 // in ms
@@ -266,6 +268,7 @@ xQueueHandle xQ_list_mailbox = 0;
 TimerHandle_t task1_timer = 0;
 TimerHandle_t task2_timer = 0;
 TimerHandle_t task3_timer = 0;
+TimerHandle_t Monitor_task_timer = 0;
 
 // Timer callback
 void vTimerCallback(TimerHandle_t xtimer);
@@ -305,15 +308,17 @@ int main(void)
 	task1_timer = xTimerCreate("Task1", pdMS_TO_TICKS(TASK1_PERIOD), pdTRUE, (void*)0, vTimerCallback);
 	task2_timer = xTimerCreate("Task2", pdMS_TO_TICKS(TASK2_PERIOD), pdTRUE, (void*)0, vTimerCallback);
 	task3_timer = xTimerCreate("Task3", pdMS_TO_TICKS(TASK3_PERIOD), pdTRUE, (void*)0, vTimerCallback);
+	Monitor_task_timer = xTimerCreate("Monitor", pdMS_TO_TICKS(MONITOR_TASK_PERIOD), pdTRUE, (void*)0, vMonitorCallback);
 
 	xTaskCreate(Deadline_Driven_Scheduler, "DDS", configMINIMAL_STACK_SIZE, NULL, 5, &h_dds);
 	xTaskCreate(Task_Generator, "TaskGenerator", configMINIMAL_STACK_SIZE, NULL, 3, &h_task_generator);
-	//xTaskCreate(Monitor_Task, "Monitor", configMINIMAL_STACK_SIZE, NULL, 2, &h_monitor);
+	xTaskCreate(Monitor_Task, "Monitor", configMINIMAL_STACK_SIZE, NULL, 2, &h_monitor);
 
 	// Start timers
 	xTimerStart(task1_timer, 0);
 	xTimerStart(task2_timer, 0);
 	xTimerStart(task3_timer, 0);
+	xTimerStart(Monitor_task_timer, 0);
 
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
@@ -678,6 +683,10 @@ void vTimerCallback(TimerHandle_t xtimer)
 	}
 }
 
+void vMonitorCallback(TimerHandle_t xtimer)
+{
+	vTasksResume(Monitor_Task);
+}
 /*-----------------------------------------------------------*/
 
 void vApplicationMallocFailedHook( void )
