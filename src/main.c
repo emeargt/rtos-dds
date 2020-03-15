@@ -554,18 +554,21 @@ static void Deadline_Driven_Scheduler(void *pvParameters)
 					}
 				}
 			}
-			// sort active task list
-			sort(&active_head);
-			// reset task priorities
-			struct dd_task_node *temp = active_head;
-			while(temp != NULL)
+			if(active_head != NULL)
 			{
-				vTaskPrioritySet(temp->task.t_handle, RST_PRIORITY);
-				temp = temp->next_task_p;
+				// sort active task list
+				sort(&active_head);
+				// reset task priorities
+				struct dd_task_node *temp = active_head;
+				while(temp != NULL)
+				{
+					vTaskPrioritySet(temp->task.t_handle, RST_PRIORITY);
+					temp = temp->next_task_p;
+				}
+				// schedule earliest deadline task by setting priority
+				// head of active task list
+				vTaskPrioritySet(active_head->task.t_handle, SET_PRIORITY);
 			}
-			// schedule earliest deadline task by setting priority
-			// head of active task list
-			vTaskPrioritySet(active_head->task.t_handle, SET_PRIORITY);
 		}
 	}
 }
@@ -578,16 +581,16 @@ static void Task_Generator(void *pvParameters)
 		vTaskSuspend(h_task_generator);
 		while(uxQueueMessagesWaiting(xQ_new_tasks))
 		{
-			struct task_info new_task;
-			if(xQueueReceive(xQ_new_tasks, &new_task, 0))
+			struct task_info* new_task = (struct task_info*)pvPortMalloc(sizeof(struct task_info));
+			if(xQueueReceive(xQ_new_tasks, new_task, 0))
 			{
 				char name[20];
 				sprintf(name, "Task%u", (unsigned int)id);
-				new_task.id = id;
+				new_task->id = id;
 				TaskHandle_t h_new = 0;
-				uint32_t abs_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(new_task.period);
-				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)(&new_task), 0, &h_new);
-				release_dd_task(h_new, new_task.type, id, abs_deadline);
+				uint32_t abs_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(new_task->period);
+				xTaskCreate(User_Task, name, configMINIMAL_STACK_SIZE, (void*)new_task, 0, &h_new);
+				release_dd_task(h_new, new_task->type, id, abs_deadline);
 				++id;
 			}
 		}
@@ -632,6 +635,7 @@ static void User_Task(void *pvParameters)
 #ifdef DISPLAY_LEDS
 		STM_EVAL_LEDOff(task->led);
 #endif
+		vPortFree((void*)task); // free task info
 		complete_dd_task(task->id);
 	}
 }
