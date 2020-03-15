@@ -166,7 +166,7 @@ functionality.
 // Queue length
 #define mainQUEUE_LENGTH 100
 
-#define MONITOR_TASK_PERIOD 0
+#define MONITOR_TASK_PERIOD 250
 
 // Task values
 #define TASK1_PERIOD 500 // in ms
@@ -272,6 +272,7 @@ TimerHandle_t Monitor_task_timer = 0;
 
 // Timer callback
 void vTimerCallback(TimerHandle_t xtimer);
+void vMonitorCallback(TimerHandle_t xtimer);
 
 /* F-Task handles */
 TaskHandle_t h_dds = 0;
@@ -310,7 +311,7 @@ int main(void)
 	task3_timer = xTimerCreate("Task3", pdMS_TO_TICKS(TASK3_PERIOD), pdTRUE, (void*)0, vTimerCallback);
 	Monitor_task_timer = xTimerCreate("Monitor", pdMS_TO_TICKS(MONITOR_TASK_PERIOD), pdTRUE, (void*)0, vMonitorCallback);
 
-	xTaskCreate(Deadline_Driven_Scheduler, "DDS", configMINIMAL_STACK_SIZE, NULL, 5, &h_dds);
+	xTaskCreate(Deadline_Driven_Scheduler, "DDS", configMINIMAL_STACK_SIZE, NULL, 4, &h_dds);
 	xTaskCreate(Task_Generator, "TaskGenerator", configMINIMAL_STACK_SIZE, NULL, 3, &h_task_generator);
 	xTaskCreate(Monitor_Task, "Monitor", configMINIMAL_STACK_SIZE, NULL, 2, &h_monitor);
 
@@ -472,29 +473,35 @@ struct dd_task_node** get_overdue_dd_task_list(void)
 
 void print_task_list(struct dd_task_node** head)
 {
-	struct dd_task_node* temp_dd_task_node = *head;
-	int i = 1;
-
-	do
+	if(head == NULL)
 	{
-
-	#ifdef BASIC_VIEW
-		i++;
-	#endif
-
-	#ifdef ADVANCED_VIEW
-		printf("#%-3d \t", i);
-		printf("Task ID: %d \n", &(temp_dd_task_node->task_p->task_id));
-		//keep listing task parameters as desired
-		i++;
-	#endif
-
-	temp_dd_task_node = temp_dd_task_node->next_task_p;
-
+		printf("No tasks in list.\n");
 	}
-	while(temp_dd_task_node->next_task_p != NULL);
+	else
+	{
+ 		struct dd_task_node* temp_dd_task_node = *head;
+		int i = 0;
+		do
+		{
 
-	printf("Number of tasks in list: %d \n", (i-1));
+		#ifdef BASIC_VIEW
+			++i;
+		#endif
+
+		#ifdef ADVANCED_VIEW
+			printf("#%-3d \t", i);
+			printf("Task ID: %d\n", &(temp_dd_task_node->task_p->task_id));
+			//keep listing task parameters as desired
+			i++;
+		#endif
+
+		temp_dd_task_node = temp_dd_task_node->next_task_p;
+
+		}
+		while(temp_dd_task_node != NULL);
+
+		printf("Number of tasks in list: %d\n", i);
+	}
 
 }
 
@@ -608,8 +615,6 @@ static void Monitor_Task(void *pvParameters)
 	{
 		vTaskSuspend(h_monitor);
 
-		//struct dd_task_list** temp;
-
 		printf("Active DD Task List Monitor Data: \n");
 		print_task_list(get_active_dd_task_list());
 
@@ -618,7 +623,6 @@ static void Monitor_Task(void *pvParameters)
 
 		printf("Overdue DD Task List Monitor Data: \n");
 		print_task_list(get_overdue_dd_task_list());
-
 	}
 }
 
@@ -689,7 +693,7 @@ void vTimerCallback(TimerHandle_t xtimer)
 
 void vMonitorCallback(TimerHandle_t xtimer)
 {
-	vTasksResume(Monitor_Task);
+	vTaskResume(h_monitor);
 }
 /*-----------------------------------------------------------*/
 
